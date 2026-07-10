@@ -5,6 +5,7 @@ from datetime import datetime
 from dataclasses import dataclass
 import plotext as plt
 import gzip
+import time
 
 
 class LogAnalyzer:
@@ -125,6 +126,7 @@ def analyze(entry: LogEntry, analyzer: LogAnalyzer):
 
 
 def process_file(path):
+    start_time = time.time()
     analyzer = LogAnalyzer()
 
     if path.endswith(".gz"):
@@ -197,13 +199,20 @@ def process_file(path):
         if count >= threshold:
             print(ip, count)
 
+    threshold_of_hourly_traffic = 10.0
+    for hour, count in analyzer.hourly_errors_5xx.items():
+        total_hour_traffic = analyzer.hourly_distribution[hour]
+        if total_hour_traffic > 0:
+            percent_hourly_traffic = (count / total_hour_traffic) * 100
+            if percent_hourly_traffic >= threshold_of_hourly_traffic:
+                print(hour, count, f"{percent_hourly_traffic:.2f}%")
 
-    threshold_of_hourly_traffic = 10
-    for ip, count in analyzer.hourly_errors_5xx.items():
-        percent_hourly_traffic = (count / sum(analyzer.hourly_errors_5xx.values())) * 100
-        if percent_hourly_traffic >= threshold_of_hourly_traffic:
-            print(ip, count)
 
+
+
+
+    execution_time = time.time() - start_time
+    print(execution_time)
 if __name__ == "__main__":
 
     if len(sys.argv) < 2:
