@@ -15,6 +15,7 @@ class LogAnalyzer:
         self.endpoints = Counter()
         self.status_groups = Counter({"4xx": 0, "5xx": 0, "other": 0})
         self.hourly_distribution = Counter()
+        self.sus_users = Counter()
 
     def add_line(self):
         self.total_lines += 1
@@ -38,6 +39,9 @@ class LogAnalyzer:
 
     def add_hourly_traffic(self, hour: int):
         self.hourly_distribution[hour] += 1
+
+    def add_sus_users(self, ip: str):
+        self.sus_users[ip] += 1
 @dataclass
 class LogEntry:
     ip: str
@@ -102,12 +106,14 @@ def analyze(entry: LogEntry, analyzer: LogAnalyzer):
 
     analyzer.add_ip(entry.ip)
 
-
     analyzer.add_endpoints(entry.path.strip())
 
     analyzer.add_status(entry.status)
 
     analyzer.add_hourly_traffic(entry.timestamp.hour)
+
+    if entry.path == "login/" and entry.status == 401:
+        analyzer.add_sus_users(entry.ip)
     pass
 
 
@@ -177,6 +183,12 @@ def process_file(path):
     print("\n" + "=" * 66)
 
 
+
+    print("----------------------")
+    threshold = 3
+    for ip, count in analyzer.sus_users.items():
+        if count >= threshold:
+            print(ip, count)
 if __name__ == "__main__":
 
     if len(sys.argv) < 2:
