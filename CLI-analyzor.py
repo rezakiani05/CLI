@@ -4,6 +4,7 @@ from collections import Counter
 from datetime import datetime
 from dataclasses import dataclass
 import plotext as plt
+import gzip
 
 
 class LogAnalyzer:
@@ -113,8 +114,12 @@ def analyze(entry: LogEntry, analyzer: LogAnalyzer):
 def process_file(path):
     analyzer = LogAnalyzer()
 
+    if path.endswith(".gz"):
+        open_func = gzip.open(path, "rt", encoding="utf-8", errors="replace")
+    else:
+        open_func = open(path, "r", encoding="utf-8", errors="replace")
 
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
+    with open_func as f:
         for raw_line in f:
             line = raw_line.strip()
 
