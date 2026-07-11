@@ -1,12 +1,12 @@
 import re
-import sys
 from collections import Counter
 from datetime import datetime
 from dataclasses import dataclass
 import plotext as plt
 import gzip
 import time
-
+import argparse
+import json
 
 class LogAnalyzer:
     def __init__(self):
@@ -125,7 +125,7 @@ def analyze(entry: LogEntry, analyzer: LogAnalyzer):
     pass
 
 
-def process_file(path):
+def process_file(path, top_n, export_json):
     start_time = time.time()
     analyzer = LogAnalyzer()
 
@@ -150,30 +150,73 @@ def process_file(path):
                 analyzer.add_malformed_line()
                 continue
 
-    print(analyzer.total_lines)
-    print(analyzer.malformed_lines)
-    print(analyzer.unique_ips.__len__())
 
-    top_10 = analyzer.endpoints.most_common(10)
-    for index, (path, count) in enumerate(top_10, 1):
-        print(f"{index}. Path: {path:<40} | Requests: {count}")
 
+    execution_time = time.time() - start_time
 
     number_of_errors = analyzer.status_groups["4xx"] + analyzer.status_groups["5xx"]
     total_status = sum(analyzer.status_groups.values())
-    percent_of_error = (number_of_errors / total_status) * 100
-    print(percent_of_error)
+    percent_of_error = (number_of_errors / total_status) * 100 if total_status > 0 else 0.0
 
+    error_spikes = []
+    threshold_of_hourly_traffic = 10.0
+    for hour, count in analyzer.hourly_errors_5xx.items():
+        total_hour_traffic = analyzer.hourly_distribution[hour]
+        if total_hour_traffic > 0:
+            percent_hourly_traffic = (count / total_hour_traffic) * 100
+            if percent_hourly_traffic >= threshold_of_hourly_traffic:
+                error_spikes.append({
+                    "hour": hour,
+                    "count": count,
+                    "rate": f"{percent_hourly_traffic:.2f}%"
+                })
 
+    suspicious_ips = {ip: count for ip, count in analyzer.sus_users.items() if count >= 3}
 
-    print("\n" + "=" * 66)
-    print(f"{'VERTICAL HOURLY TRAFFIC HISTOGRAM':^66}")
-    print("=" * 66 + "\n")
+    if export_json:
+        report_data = {
+            "summary": {
+                "total_lines": analyzer.total_lines,
+                "malformed_lines": analyzer.malformed_lines,
+                "unique_ips_count": len(analyzer.unique_ips),
+                "global_error_rate": f"{percent_of_error:.2f}%"
+            },
+            "top_endpoints": [{"path": path, "requests": count} for path, count in
+                              analyzer.endpoints.most_common(top_n)],
+            "suspicious_brute_force_ips": suspicious_ips,
+            "hourly_error_spikes_5xx": error_spikes,
+            "performance": {
+                "execution_time_seconds": round(execution_time, 4)
+            }
+        }
+        with open("report.json", "w", encoding="utf-8") as json_file:
+            json.dump(report_data, json_file, indent=4, ensure_ascii=False)
+        print("✅ Success: System report exported to 'report.json'.")
+        return
+
+    print("\n" + "═" * 66)
+    print(f" {'LOG ANALYSIS SUMMARY REPORT':^64} ")
+    print("═" * 66)
+    print(f" 📂 Log Source Path:    {path}")
+    print(f" 🔢 Total Lines:         {analyzer.total_lines:,}")
+    print(f" ⚠️ Malformed Lines:    {analyzer.malformed_lines:,}")
+    print(f" 🌐 Unique IP Addresses: {len(analyzer.unique_ips):,}")
+    print(f" 📉 Global Error Rate:   {percent_of_error:.2f}%")
+    print("─" * 66)
+
+    print(f"\n 🔥 TOP {top_n} ENDPOINTS:")
+    top_endpoints = analyzer.endpoints.most_common(top_n)
+    for index, (path_name, count) in enumerate(top_endpoints, 1):
+        print(f"   {index:02d}. Path: {path_name:<35} | Requests: {count:,}")
+    print("─" * 66)
+
+    print("\n" + "═" * 66)
+    print(f" {'VERTICAL HOURLY TRAFFIC HISTOGRAM':^64} ")
+    print("═" * 66 + "\n")
 
     hours = list(range(24))
     counts = [analyzer.hourly_distribution[h] for h in hours]
     max_count = max(counts) if counts else 1
-
     graph_height = 15
 
     for level in range(graph_height, 0, -1):
@@ -186,42 +229,41 @@ def process_file(path):
         print(line_str)
 
     print(" ──" + "─────" * 23 + "── ")
-
     hour_labels = "".join(f" {h:02d}  " for h in hours)
     print(hour_labels)
-    print("\n" + "=" * 66)
+    print("\n" + "═" * 66)
+
+    print("\n 🚨 SECURITY ANOMALY DETECTION (401 on /login):")
+    if suspicious_ips:
+        for ip, count in sorted(suspicious_ips.items(), key=lambda x: x[1], reverse=True):
+            print(f"   ⚠️ Suspicious IP: {ip:<15} | Failed Attempts: {count}")
+    else:
+        print("   ✅ No suspicious brute-force activity detected.")
+    print("─" * 66)
+
+    print("\n 📉 AUTOMATIC ERROR SPIKE DETECTION (5xx > 10%):")
+    if error_spikes:
+        for spike in error_spikes:
+            print(
+                f"   💥 Hour {spike['hour']:02d}:00 | 5xx Errors: {spike['count']:<4} | Failure Rate: {spike['rate']}")
+    else:
+        print("   ✅ Server health stable. No significant error spikes detected.")
+    print("─" * 66)
+
+    print(f"\n ⏱️ Performance Execution Time: {execution_time:.4f} seconds\n")
 
 
-
-    print("----------------------")
-    threshold = 3
-    for ip, count in analyzer.sus_users.items():
-        if count >= threshold:
-            print(ip, count)
-
-    threshold_of_hourly_traffic = 10.0
-    for hour, count in analyzer.hourly_errors_5xx.items():
-        total_hour_traffic = analyzer.hourly_distribution[hour]
-        if total_hour_traffic > 0:
-            percent_hourly_traffic = (count / total_hour_traffic) * 100
-            if percent_hourly_traffic >= threshold_of_hourly_traffic:
-                print(hour, count, f"{percent_hourly_traffic:.2f}%")
-
-
-
-
-
-    execution_time = time.time() - start_time
-    print(execution_time)
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Professional Log Analyzer CLI")
 
-    if len(sys.argv) < 2:
-        print("❌ Error: Please provide the log file path.")
-        print("Usage: python CLI-analyzor.py <path_to_log_file>")
-        sys.exit(1)
+    parser.add_argument("path", type=str, help="Path to the log file (.log or .gz)")
 
-    path = sys.argv[1]
+    parser.add_argument("--top", type=int, default=10, help="Number of top endpoints to display")
 
-    process_file(path)
+    parser.add_argument("--json", action="store_true", help="Export output to a JSON file")
+
+    args = parser.parse_args()
+
+    process_file(args.path, args.top, args.json)
 
 
